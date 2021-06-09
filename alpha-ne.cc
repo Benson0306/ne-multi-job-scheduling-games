@@ -2,212 +2,153 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <string>
+#include <cstdlib>
+#include <ctime>
 #include "jsgame.h"
 using namespace std;
 
+int main(int argc, char *argv[])
+{        
+    int num_of_players = atoi(argv[1]);     
+    int num_of_machines = atoi(argv[2]);  
+    int max_jobs = atoi(argv[3]);        
+    int max_processing_time = atoi(argv[4]);
+    int num_of_interations = atoi(argv[5]);
+    int num_of_threads = atoi(argv[6]);
 
-int main()
-{
-    int number_of_players = 2;
-    int number_of_machines = 3;
-    int max_jobs = 3;
-    int max_processing_time = 5;
-
-    vector<Player> players; // each player
+    vector<Player> players;   // each player
     vector<Machine> machines; // each machine
+
+    double strict_ir_min = 1;
+    double strict_ir_avg = 1;
+    double loose_ir_avg = 1;
+    double ir_all = 1;
+    string strict_ir_min_str = "no case\n";
+    string strict_ir_avg_str = "no case\n";
+    string loose_ir_avg_str = "no case\n";
+    string ir_all_str = "no case\n";
 
     srand(time(NULL));
 
-    // initialize palyers
-    for (int i = 0; i < number_of_players; i++)
-    {
-        players.push_back(Player(max_jobs, max_processing_time));
-    }
-
-    // initialize machines
-    for (int i = 0; i < number_of_machines; i++)
-    {
-        machines.push_back(Machine());
-    }
-
-    int total;
-    int machine_id;
-
-    // count the number of jobs
-    int number_of_job = 0;
-    for (const auto &i : players)
-    {
-        number_of_job += i.jobs.size();
-    }
-
-    // each job has many choice 
-    int total_case = pow(machines.size(), number_of_job);
-
-    // traverse all assignments
-    for (int a = 0; a < total_case; a++)
+    float progress = 0.0;
+    for (int iter = 0; iter < num_of_interations; iter++)
     {   
-        // generate each assignment
-        vector<int> assignment = toBase(a, machines.size(), number_of_job);
+        int barWidth = 50;
+        cout << "[";
+        int pos = barWidth * progress;
+        for (int i = 0; i < barWidth; ++i)
+        {
+            if (i < pos)
+                cout << "=";
+            else if (i == pos)
+                cout << ">";
+            else
+                cout << " ";
+        }
+        cout << "] " << int(progress * 100.0) << " %\r";
+        cout.flush();
 
-        // assigning jobs
-        int current_job = 0;
-        for (int i = 0; i < players.size(); i++)
-        {   
-            
-            for (auto &&j : players[i].jobs)
+        // initialize palyers
+        for (int i = 0; i < num_of_players; i++)
+        {
+            players.push_back(Player(max_jobs, max_processing_time));
+        }
+
+        
+        // initialize machines
+        for (int i = 0; i < num_of_machines; i++)
+        {
+            machines.push_back(Machine());
+        }
+
+        int total;
+        int machine_id;
+
+        // count the number of jobs
+        int number_of_job = 0;
+        for (const auto &i : players)
+        {
+            number_of_job += i.jobs.size();
+        }
+
+        // thread infos
+        int total_cases = pow(machines.size(), number_of_job);
+        int num_of_cases = total_cases / num_of_threads;
+        Thread_info *thread_info = (Thread_info *)malloc(sizeof(Thread_info) * num_of_threads);
+        pthread_t *threads = (pthread_t *)malloc(sizeof(pthread_t) * (num_of_threads - 1));
+
+        // start threads
+        for (int i = 0; i < num_of_threads - 1; i++)
+        {
+            thread_info[i].id = i;
+            thread_info[i].num_of_cases = num_of_cases;
+            thread_info[i].total_jobs = number_of_job;
+            thread_info[i].left_cases = 0;
+            thread_info[i].machines = machines;
+            thread_info[i].players = players;
+            pthread_create(&threads[i], NULL, thread_func, (void *)&thread_info[i]);
+        }
+
+        // join threads
+        for (int i = 0; i < num_of_threads - 1; i++)
+        {
+            pthread_join(threads[i], NULL);
+        }
+
+        // main thread
+        thread_info[num_of_threads - 1].id = num_of_threads - 1;
+        thread_info[num_of_threads - 1].num_of_cases = num_of_cases;
+        thread_info[num_of_threads - 1].left_cases = total_cases % num_of_threads;
+        thread_info[num_of_threads - 1].total_jobs = number_of_job;
+        thread_info[num_of_threads - 1].machines = machines;
+        thread_info[num_of_threads - 1].players = players;
+        thread_func((void *)&thread_info[num_of_threads - 1]);
+
+
+        for (int i = 0; i < num_of_threads; i++)
+        {
+
+            if (thread_info[i].strict_ir_min > strict_ir_min)
             {
-                j.machine_id = assignment[current_job];
-                j.player_id = i;
-                machines[j.machine_id].jobs.push_back(j);
-                machines[j.machine_id].load += j.processing_time;
-                
-                current_job++;
+                strict_ir_min = thread_info[i].strict_ir_min;
+                strict_ir_min_str = thread_info[i].strict_ir_min_str;
+            }
+            if (thread_info[i].strict_ir_avg > strict_ir_avg)
+            {
+                strict_ir_avg = thread_info[i].strict_ir_avg;
+                strict_ir_avg_str = thread_info[i].strict_ir_avg_str;
+            }
+            if (thread_info[i].loose_ir_avg > loose_ir_avg)
+            {
+                loose_ir_avg = thread_info[i].loose_ir_avg;
+                loose_ir_avg_str = thread_info[i].loose_ir_avg_str;
+            }
+            if (thread_info[i].ir_all > ir_all)
+            {
+                ir_all = thread_info[i].ir_all;
+                ir_all_str = thread_info[i].ir_all_str;
             }
         }
+        
+        // if(strict_ir_min != 1 || strict_ir_avg != 1 || loose_ir_avg != 1)
+        // {
+        //     cout << iter << " : ";
+        //     cout << strict_ir_min << " " << strict_ir_avg << " " << loose_ir_avg << endl;
+        //     cout << "--------------\n";
+        // }   
+    
+        // clear players
+        players.clear();
 
-        if (checkWE(machines)) 
-        {
-            printMachines(machines);
-            cout << "-----------------" << endl;
-            
-            // for each player
-            for (int i = 0; i < players.size(); i++)
-            {   
-                double ir_min_schedule = INT16_MIN;
-                double ir_min_coalition = INT16_MAX;
+        // clear machines
+        machines.clear();
 
-                // coalition starts from size 2
-                for (int k = 2; k <= players[i].jobs.size(); k++)
-                {  
-                    vector<vector<int>> coalition = combination(players[i].jobs.size(), k);
-
-                    // for each coalition
-                    for (const auto &c : coalition)
-                    {  
-                        // find all machines involved in coalition
-                        vector<int> machine_set;
-
-                        for (const auto &j : c)
-                        {
-                            machine_set.push_back(players[i].jobs[j].machine_id);
-                        }
-                        vector<int>::iterator last = unique(machine_set.begin(), machine_set.end());
-
-                        machine_set.resize(distance(machine_set.begin(), last));
-
-                        // all jobs reside in the same machine
-                        if (machine_set.size() == 1) 
-                        {
-                            cout << "all jobs reside in the same machine" << endl;
-                            cout << "-----------------" << endl;
-                            continue;
-                        }
-                        // target machine for coalition member
-                        vector<vector<int>> targets(c.size(), vector<int>(0,0));
-
-            
-                        for (int j = 0; j < c.size(); j++)
-                        {
-                             for (const auto m: machine_set)
-                            {
-
-                                if (players[i].jobs[c[j]].machine_id == m) continue;
-                                
-                                targets[j].push_back(m);
-                            }
-                        }
-                    
-                        // to keep track of next element in each job
-                        vector<int> indices(c.size(), 0);
-
-                        while(true) 
-                        {   
-                            // current deviation
-                            vector<int> deviation;
-                            vector<int> load_after;
-
-                            for (int j = 0; j < c.size(); j++)
-                            {
-                                deviation.push_back(targets[j][indices[j]]);
-                            }
-                            
-                            // initial load
-                            for (const auto &m: machines)
-                            {
-                                load_after.push_back(m.load);
-                            }
-                            
-                            // deviating
-                            for (int j = 0; j < c.size(); j++)
-                            {   
-                                // before
-                                load_after[players[i].jobs[c[j]].machine_id] -= players[i].jobs[c[j]].processing_time;
-                                // after
-                                load_after[deviation[j]] += players[i].jobs[c[j]].processing_time;
-                            }
-
-                            // compute IR
-                            for (int j = 0; j < c.size(); j++)
-                            {       
-                                    
-                                double ir = (double)machines[players[i].jobs[c[j]].machine_id].load/load_after[deviation[j]]; 
-                        
-                                cout << "Job " << c[j] << "(" << players[i].jobs[c[j]].processing_time << ")"
-                                    << " from M" << players[i].jobs[c[j]].machine_id + 1
-                                    << "(" << machines[players[i].jobs[c[j]].machine_id].load  << ") to M" << deviation[j] + 1 
-                                    << "(" << load_after[deviation[j]] << ")" << " IR =" << ir << endl;
-
-                                if (ir <= 1)
-                                    
-                                if (ir < ir_min_coalition)
-                                    ir_min_coalition = ir;
-                            }
-                            
-                            if (ir_min_coalition > ir_min_schedule)                       
-                                ir_min_schedule = ir_min_coalition;
-                            
-                            
-                            //cout << ir_min_coalition << " " << ir_min_schedule << endl; 
-                            
-                            // find the rightmost array that has more
-                            // elements left after the current element
-                            // in that array
-                            int next = c.size() - 1;
-                            while (next >= 0 && indices[next] + 1 >= targets[next].size())
-                                next--;
-                    
-                            // no such array is found so no more
-                            // combinations left
-                            if (next < 0)
-                            {
-                                cout << "-----------------" << endl;
-                                break;
-                            }
-                            // if found move to next element in that
-                            // array
-                            indices[next]++;
-                    
-                            // for all arrays to the right of this
-                            // array current index again points to
-                            // first element
-                            for (int j = next + 1; j < c.size(); j++)
-                                indices[j];
-                        }
-                    }
-                }
-                cout << "======>Player" << i << "'s" << " IR(min)= " << ir_min_schedule << endl;
-            }
-            cout << "\n*********************************************\n";
-        }
-
-        // clear each machine
-        for (auto &&i : machines)
-        {
-            i.jobs.clear();
-            i.load = 0;
-        }
+        // update progress
+        progress = (iter + 2)/(float)num_of_interations;
     }
-
+    cout << endl;
+    cout << strict_ir_min << " " << strict_ir_avg << " " << loose_ir_avg << " " << ir_all << endl;
 
     return 0;
 }
